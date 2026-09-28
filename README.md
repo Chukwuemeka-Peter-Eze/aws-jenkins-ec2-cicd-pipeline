@@ -1,272 +1,176 @@
 # AWS Jenkins CI/CD Pipeline
 
-A hands-on CI/CD project that automates the journey from source code to a running Dockerized application on Amazon EC2.
+A practical CI/CD project built with **GitHub, Jenkins, Maven, Docker,
+Docker Hub, SSH, and Amazon EC2**.
 
-This repository started as a manual EC2 deployment exercise and evolved into a Jenkins-driven delivery workflow. The project is intentionally built in stages so that each step exposes a different part of the delivery chain: source control, build automation, containerization, image publishing, remote deployment, networking, and operational troubleshooting.
+This repository documents an end-to-end pipeline I built and practiced
+from source code commit through application deployment on an EC2 server.
 
-The current implementation uses **Jenkins, Maven, Docker, Docker Hub, SSH, and Amazon EC2**. The repository also documents the planned progression toward **Docker Compose, Amazon ECR, and dynamic image versioning**.
+The project started as a simple CI/CD exercise and became a useful
+hands-on environment for understanding how source control, build
+automation, containerization, image registries, Jenkins, Linux, SSH,
+Docker, AWS infrastructure, and application deployment fit together.
 
----
+------------------------------------------------------------------------
 
-## What This Project Demonstrates
+## Project Overview
 
-The core workflow currently implemented is:
+The pipeline follows this workflow:
 
-```text
+``` text
 Developer
-    |
-    | Git push
-    v
+   |
+   v
 GitHub Repository
-    |
-    v
+   |
+   v
 Jenkins Multibranch Pipeline
-    |
-    +----------------------+
-    |                      |
-    v                      v
- Maven Build          Docker Build
-    |                      |
-    v                      v
+   |
+   +----------------------+
+   |                      |
+   v                      v
+Maven Build          Docker Build
+   |                      |
+   v                      v
 JAR Artifact          Docker Image
-                           |
-                           v
-                       Docker Hub
-                           |
-                           | SSH
-                           v
-                     Amazon EC2
-                           |
-                           v
-                    Docker Container
-                           |
-                           v
-                  Application :8081
+                          |
+                          v
+                    Docker Hub
+                          |
+                          v
+                 SSH to EC2 Server
+                          |
+                          v
+                  Docker Pull Image
+                          |
+                          v
+                  Docker Container
+                          |
+                          v
+                  Spring Boot App
 ```
 
-The application is packaged as:
+The application is exposed on **port 8081 on the EC2 host**, while the
+application itself listens on **port 8080 inside the container**.
 
-```text
-java-maven-app-1.1.0-SNAPSHOT.jar
+``` text
+EC2 Host
+  |
+  | port 8081
+  v
+Docker Container
+  |
+  | port 8080
+  v
+Spring Boot Application
 ```
 
-The application listens on port `8080` inside the container and is published on port `8081` on the EC2 host:
+This separation is intentional because Jenkins is already using host
+port `8080`.
 
-```text
-EC2 :8081  ->  Container :8080
-```
+------------------------------------------------------------------------
 
-Application endpoint:
+# What I Practiced
 
-```text
-http://<EC2-PUBLIC-IP>:8081/
-```
+I practiced the project from beginning to end, including:
 
----
+-   Git and GitHub source control
+-   Jenkins Multibranch Pipeline
+-   Jenkins Pipeline syntax
+-   Jenkins shared/helper Groovy script
+-   Maven application packaging
+-   Docker image creation
+-   Docker Hub authentication
+-   Docker image publishing
+-   Jenkins running inside Docker
+-   Jenkins access to the host Docker daemon
+-   Docker socket configuration
+-   Docker group permissions
+-   SSH-based deployment
+-   Amazon EC2 administration
+-   Linux command-line troubleshooting
+-   Docker container lifecycle management
+-   Application port mapping
+-   Security Group configuration
+-   CI/CD troubleshooting
+-   Application container verification
+-   Documentation of real deployment failures and fixes
 
-# Project Goals
+No screenshots are required to understand or reproduce the project. The
+repository focuses on the actual implementation, configuration,
+commands, architecture, and troubleshooting decisions.
 
-The project is designed to build practical understanding of how a CI/CD system moves an application through several engineering boundaries:
-
-1. Source control
-2. Automated build
-3. Artifact creation
-4. Container image creation
-5. Image publishing
-6. Remote deployment
-7. Runtime verification
-8. Infrastructure and application troubleshooting
-
-The objective is not simply to make Jenkins execute commands. The objective is to understand what each component contributes to the delivery process and what evidence is required when something fails.
-
----
+------------------------------------------------------------------------
 
 # Technology Stack
 
-| Technology | Role |
-|---|---|
-| Git / GitHub | Source control and pipeline trigger |
-| Jenkins | CI/CD automation |
-| Jenkins Multibranch Pipeline | Branch-aware pipeline execution |
-| Maven | Java build and packaging |
-| Spring Boot | Application framework |
-| Amazon Corretto 17 | Java runtime inside the application container |
-| Docker | Application containerization |
-| Docker Hub | Container image registry in the current implementation |
-| SSH | Jenkins-to-EC2 remote access |
-| Amazon EC2 | Application deployment environment |
-| AWS Security Groups | Network access control |
-| Docker Compose | Planned/progressive deployment improvement |
-| Amazon ECR | Planned/progressive registry improvement |
+  Technology                     Purpose
+  ------------------------------ -----------------------------------
+  Git                            Version control
+  GitHub                         Source code hosting
+  Jenkins                        CI/CD automation
+  Jenkins Multibranch Pipeline   Branch-aware pipeline execution
+  Groovy                         Jenkins pipeline/helper scripting
+  Maven                          Java build and packaging
+  Java                           Application runtime
+  Docker                         Application containerization
+  Docker Hub                     Container image registry
+  SSH                            Remote EC2 deployment
+  Amazon EC2                     Application deployment server
+  AWS Security Groups            Network access control
+  Linux                          Server administration
 
----
+------------------------------------------------------------------------
 
 # Repository Structure
 
-```text
-.
+``` text
+aws-jenkins-ec2-cicd-pipeline/
+│
 ├── Dockerfile
 ├── Jenkinsfile
 ├── script.groovy
 ├── pom.xml
-├── README.md
+├── src/
+│   └── ...
+│
+├── target/
+│   └── ...
+│
 ├── docs/
 │   ├── deployment.md
+│   ├── troubleshooting.md
 │   ├── lessons-learned.md
 │   ├── publishing-checklist.md
-│   ├── screenshots.md
-│   └── troubleshooting.md
-└── src/
+│   └── system-design.md
+│
+└── README.md
 ```
 
-The `docs/` directory contains supporting operational documentation rather than duplicating the README.
+The documentation folder is intentionally focused on implementation and
+engineering decisions rather than screenshots.
 
----
+------------------------------------------------------------------------
 
-# CI/CD Pipeline
+# Application
 
-The current Jenkins pipeline is deliberately separated into a small number of clear stages.
+The project uses a Maven-based Java application.
 
-```text
-Source Checkout
-      |
-      v
-Initialization
-      |
-      v
-Build JAR
-      |
-      v
-Build Docker Image
-      |
-      v
-Push Image
-      |
-      v
-SSH to EC2
-      |
-      v
-Pull Image
-      |
-      v
-Replace Running Container
-      |
-      v
-Expose Application on :8081
-```
+The Maven project produces:
 
-## Pipeline responsibilities
-
-### 1. Initialization
-
-Jenkins loads the shared Groovy deployment/build functions from:
-
-```text
-script.groovy
-```
-
-The Jenkinsfile remains responsible for pipeline structure while `script.groovy` contains reusable implementation logic.
-
-### 2. Build
-
-Maven packages the Spring Boot application:
-
-```bash
-mvn package
-```
-
-The resulting artifact is:
-
-```text
+``` text
 target/java-maven-app-1.1.0-SNAPSHOT.jar
 ```
 
-### 3. Docker Build
+The application is then packaged into a Docker image.
 
-The application is packaged into a Docker image using:
-
-```text
-amazoncorretto:17-alpine-jdk
-```
-
-The Dockerfile copies the Maven-generated JAR into the image and starts it with Java.
-
-### 4. Image Publishing
-
-The current implementation publishes the image to Docker Hub:
-
-```text
-pierrechukason/demo-app.jma-1.1
-```
-
-Jenkins authenticates using a Jenkins-managed Docker Hub credential rather than storing registry credentials directly in the repository.
-
-### 5. Deployment
-
-Jenkins uses the configured EC2 SSH credential to connect to the deployment host.
-
-The deployment process:
-
-```text
-Pull latest image
-      |
-      v
-Remove previous container
-      |
-      v
-Start new container
-```
-
-The application container is published as:
-
-```text
-8081:8080
-```
-
-This means:
-
-```text
-EC2 host port 8081
-        |
-        v
-Docker container port 8080
-```
-
----
-
-# Why Port 8081?
-
-Jenkins and the application are deployed on the same EC2 instance.
-
-Jenkins itself uses host port `8080`, so the application cannot also bind to host port `8080`.
-
-Instead, the application uses:
-
-```text
-Host:8081 -> Container:8080
-```
-
-This is a useful example of the difference between an application's internal listening port and the port exposed by the deployment host.
-
-The Spring Boot application continues to listen on its normal container port:
-
-```text
-8080
-```
-
-Only the EC2-facing port changes:
-
-```text
-8081
-```
-
----
+------------------------------------------------------------------------
 
 # Dockerfile
 
-The application Dockerfile is intentionally small:
+The application Dockerfile uses Amazon Corretto 17:
 
-```dockerfile
+``` dockerfile
 FROM amazoncorretto:17-alpine-jdk
 
 EXPOSE 8080
@@ -277,824 +181,1228 @@ WORKDIR /usr/app
 ENTRYPOINT ["java", "-jar", "java-maven-app-1.1.0-SNAPSHOT.jar"]
 ```
 
-The important relationship is between Maven's output and the Docker entrypoint.
+The important distinction is:
 
-Maven produces:
+-   `8080` is the application port inside the container.
+-   `8081` is the port exposed on the EC2 host.
 
-```text
-java-maven-app-1.1.0-SNAPSHOT.jar
+The resulting mapping is:
+
+``` text
+8081:8080
 ```
 
-and the Docker image starts exactly that artifact.
+------------------------------------------------------------------------
 
-A previous deployment failure demonstrated why this matters: the image attempted to start `java-maven-app-1.0-SNAPSHOT.jar` while Maven was producing version `1.1.0`. The container therefore exited immediately with:
+# Jenkins Architecture
 
-```text
-Error: Unable to access jarfile java-maven-app-1.0-SNAPSHOT.jar
-```
+Jenkins runs inside a Docker container on the EC2 server.
 
-The failure was not a port or Security Group problem. The application process never started.
+The Jenkins container is connected to the host Docker daemon through:
 
----
-
-# Jenkins and Docker
-
-Jenkins itself runs inside Docker on the EC2 host.
-
-The Jenkins container has access to the host Docker daemon through:
-
-```text
+``` text
 /var/run/docker.sock
 ```
 
-The Jenkins container was also configured with access to the host Docker group so that Jenkins can execute Docker commands.
+Conceptually:
 
-This creates the following relationship:
-
-```text
-EC2 Host
-│
-├── Docker Engine
-│
-├── Jenkins Container
-│     │
-│     └── Docker CLI
-│             |
-│             └── /var/run/docker.sock
-│
-└── Application Container
+``` text
+                    EC2 HOST
+┌───────────────────────────────────────────────┐
+│                                               │
+│   ┌───────────────────────────────────────┐   │
+│   │          Jenkins Container            │   │
+│   │                                       │   │
+│   │  Jenkins Pipeline                     │   │
+│   │  Maven                                │   │
+│   │  Docker CLI                           │   │
+│   └───────────────────┬───────────────────┘   │
+│                       │                       │
+│                       │ Docker Socket         │
+│                       v                       │
+│              /var/run/docker.sock             │
+│                       │                       │
+│                       v                       │
+│              Host Docker Engine               │
+│                       │                       │
+│                       v                       │
+│              Application Container            │
+│                       │                       │
+│                 8081:8080                     │
+│                       │                       │
+└───────────────────────┼───────────────────────┘
+                        v
+                 Spring Boot App
 ```
 
-This setup is useful for learning because it makes the relationship between Jenkins, Docker CLI, the Docker daemon, and containers visible.
+This was an important part of the project because Jenkins needed to
+build Docker images even though Jenkins itself was running inside a
+container.
 
-It also introduces an important operational consideration: access to the Docker socket is highly privileged and should be treated accordingly in production environments.
+------------------------------------------------------------------------
 
----
+# Jenkins Custom Image
 
-# Jenkins Credentials
+The Jenkins container required the Docker CLI.
 
-The pipeline uses Jenkins-managed credentials for infrastructure and registry access.
+The custom Jenkins image was created using:
 
-Current credential roles include:
+``` dockerfile
+FROM jenkins/jenkins:lts
 
-| Credential ID | Purpose |
-|---|---|
-| `GitHub-PAT` | GitHub repository access |
-| `docker-hub-repo` | Docker Hub authentication |
-| `ec2-server-key` | SSH access to EC2 |
+USER root
 
-Credentials are referenced by ID rather than embedded directly into pipeline source code.
+RUN apt-get update \
+    && apt-get install -y docker.io \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-Example:
-
-```groovy
-withCredentials([
-    usernamePassword(
-        credentialsId: 'docker-hub-repo',
-        passwordVariable: 'PASS',
-        usernameVariable: 'USER'
-    )
-])
+USER jenkins
 ```
 
-The repository should never contain the actual values of these credentials.
+The Jenkins container was then started with access to the host Docker
+socket:
 
----
+``` bash
+docker run -d \
+  --name jenkins \
+  --group-add 109 \
+  -p 8080:8080 \
+  -p 50000:50000 \
+  -v jenkins_home:/var/jenkins_home \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  jenkins-docker:lts
+```
 
-# Amazon EC2 Deployment
+The Docker group ID on the host was used so that Jenkins could
+communicate with Docker without treating the Docker socket as an
+ordinary file with unrestricted permissions.
 
-The EC2 instance acts as the deployment host.
+------------------------------------------------------------------------
 
-The current deployment model is:
+# Jenkins Pipeline
 
-```text
+The Jenkins pipeline is intentionally separated into:
+
+-   `Jenkinsfile` --- pipeline definition
+-   `script.groovy` --- reusable pipeline functions
+
+## Jenkinsfile
+
+The pipeline contains the major stages:
+
+``` text
+init
+  |
+  v
+build jar
+  |
+  v
+build image
+  |
+  v
+deploy
+```
+
+The structure is:
+
+``` groovy
+def gv
+
+pipeline {
+    agent any
+
+    tools {
+        maven 'maven-3.9'
+    }
+
+    stages {
+        stage("init") {
+            steps {
+                script {
+                    gv = load "script.groovy"
+                }
+            }
+        }
+
+        stage("build jar") {
+            steps {
+                script {
+                    gv.buildJar()
+                }
+            }
+        }
+
+        stage("build image") {
+            steps {
+                script {
+                    gv.buildImage()
+                }
+            }
+        }
+
+        stage("deploy") {
+            steps {
+                script {
+                    gv.deployApp()
+                }
+            }
+        }
+    }
+}
+```
+
+------------------------------------------------------------------------
+
+# Pipeline Stage 1 --- Initialize
+
+The pipeline loads the helper script:
+
+``` groovy
+gv = load "script.groovy"
+```
+
+This keeps the Jenkinsfile relatively small while moving reusable
+functions into a separate Groovy file.
+
+------------------------------------------------------------------------
+
+# Pipeline Stage 2 --- Build the Application
+
+Maven packages the Java application:
+
+``` bash
+mvn package
+```
+
+This produces the application JAR under:
+
+``` text
+target/
+```
+
+The build artifact used by the Docker image is:
+
+``` text
+java-maven-app-1.1.0-SNAPSHOT.jar
+```
+
+------------------------------------------------------------------------
+
+# Pipeline Stage 3 --- Build and Push the Docker Image
+
+The pipeline builds:
+
+``` text
+pierrechukason/demo-app.jma-1.1
+```
+
+The image is pushed to Docker Hub.
+
+The process is:
+
+``` text
+Maven JAR
+   |
+   v
+Docker Build
+   |
+   v
+Docker Image
+   |
+   v
+Docker Hub
+```
+
+The Docker Hub repository is:
+
+``` text
+pierrechukason/demo-app.jma-1.1
+```
+
+Credentials are stored in Jenkins rather than being hard-coded into the
+pipeline.
+
+------------------------------------------------------------------------
+
+# Pipeline Stage 4 --- Deploy to EC2
+
+Jenkins connects to the EC2 server using SSH.
+
+The deployment process is:
+
+``` text
 Jenkins
    |
    | SSH
    v
-Amazon EC2
+EC2
    |
-   | Docker Pull
+   +--> docker pull
+   |
+   +--> stop/remove previous container
+   |
+   +--> start new container
+   |
+   v
+demo-app
+```
+
+The application container is started with:
+
+``` bash
+docker run -d \
+  --name demo-app \
+  -p 8081:8080 \
+  pierrechukason/demo-app.jma-1.1
+```
+
+Therefore:
+
+``` text
+EC2 port 8081
+       |
+       v
+Container port 8080
+       |
+       v
+Spring Boot application
+```
+
+------------------------------------------------------------------------
+
+# Why Port 8081?
+
+Jenkins is already exposed on:
+
+``` text
+EC2:8080
+```
+
+The application therefore cannot also bind directly to host port `8080`.
+
+The solution is:
+
+``` text
+Jenkins:
+8080:8080
+
+Application:
+8081:8080
+```
+
+This allows both services to run on the same EC2 server.
+
+The application is therefore accessed through:
+
+``` text
+http://<EC2-PUBLIC-IP>:8081/
+```
+
+------------------------------------------------------------------------
+
+# Jenkins Credentials
+
+The pipeline uses Jenkins-managed credentials.
+
+The project uses:
+
+  Credential ID       Purpose
+  ------------------- --------------------------------------
+  `docker-hub-repo`   Docker Hub authentication
+  `ec2-server-key`    SSH access to EC2
+  `GitHub-PAT`        GitHub authentication where required
+
+Credentials are referenced by ID rather than placing passwords or
+private keys directly in the repository.
+
+------------------------------------------------------------------------
+
+# AWS EC2
+
+The EC2 instance acts as the deployment server.
+
+The server is responsible for running:
+
+-   Jenkins
+-   Docker
+-   the deployed application container
+
+The deployment flow is:
+
+``` text
+GitHub
+   |
+   v
+Jenkins
+   |
    v
 Docker Hub
    |
    v
-Application Image
+EC2
    |
    v
-demo-app container
+Docker Container
 ```
 
-The application container is named:
-
-```text
-demo-app
-```
-
-The expected runtime mapping is:
-
-```text
-0.0.0.0:8081 -> 8080/tcp
-```
-
----
+------------------------------------------------------------------------
 
 # AWS Security Group
 
-The EC2 Security Group must allow inbound traffic to the application host port.
+The EC2 Security Group must allow the required traffic.
 
-For the current deployment, that means TCP port:
+The project uses:
 
-```text
-8081
+    Port Purpose
+  ------ -------------
+      22 SSH
+    8080 Jenkins
+    8081 Application
+
+Port exposure should be limited to the networks that actually need
+access.
+
+For production environments, SSH and administration ports should not be
+left broadly exposed unnecessarily.
+
+------------------------------------------------------------------------
+
+# Real Troubleshooting Experience
+
+One of the most valuable parts of this project was not simply getting
+the pipeline to run.
+
+It was understanding why individual stages failed.
+
+Several real issues were encountered during implementation.
+
+------------------------------------------------------------------------
+
+## 1. Jenkins Could Not Run Docker Commands
+
+Jenkins initially did not have access to the Docker CLI.
+
+The solution was to build a custom Jenkins image containing Docker CLI
+support.
+
+This changed the architecture from:
+
+``` text
+Jenkins Container
+      X
+Docker
 ```
 
-Opening a port in the Security Group does not itself make an application available.
+to:
 
-The complete chain must exist:
-
-```text
-Internet
-   |
-   v
-AWS Security Group :8081
-   |
-   v
-EC2 host :8081
-   |
-   v
-Docker port mapping
-   |
-   v
-Container :8080
-   |
-   v
-Spring Boot application
+``` text
+Jenkins Container
+      |
+      v
+Docker CLI
+      |
+      v
+Host Docker Socket
+      |
+      v
+Docker Engine
 ```
 
-This distinction became important during troubleshooting because a permitted Security Group port does not compensate for a stopped container or an application process that failed to start.
+------------------------------------------------------------------------
 
----
+## 2. Docker Socket Permission Problem
 
-# Verification
+Having the Docker CLI installed was not enough.
 
-A deployment is not considered complete merely because Jenkins reports that the Docker command executed.
+The Jenkins process also needed permission to communicate with:
 
-Verification should happen at several layers.
-
-## 1. Jenkins
-
-Confirm that the pipeline completed successfully.
-
-## 2. Docker image
-
-Confirm that the expected image exists locally or in Docker Hub.
-
-```bash
-docker images
+``` text
+/var/run/docker.sock
 ```
 
-## 3. Container
+The host Docker group ID was therefore passed into the Jenkins
+container.
 
-Confirm that the application is running:
+This reinforced an important lesson:
 
-```bash
-docker ps
+> Installing a CLI does not automatically provide access to the service
+> that CLI controls.
+
+------------------------------------------------------------------------
+
+## 3. Docker Hub Credential Problem
+
+The pipeline initially failed because the expected Docker Hub credential
+was not available in Jenkins.
+
+The credential was then created with the expected ID:
+
+``` text
+docker-hub-repo
 ```
 
-The expected port mapping should resemble:
+The pipeline could then authenticate and push the image.
 
-```text
-0.0.0.0:8081->8080/tcp
+This also reinforced the importance of keeping credential IDs consistent
+between Jenkins configuration and pipeline code.
+
+------------------------------------------------------------------------
+
+## 4. Host Port Collision
+
+The first deployment attempted to start the application on:
+
+``` text
+8080:8080
 ```
 
-## 4. Container logs
+But Jenkins was already using host port `8080`.
 
-Inspect application startup:
+Docker therefore could not bind the application to the same host port.
 
-```bash
-docker logs demo-app
+The deployment was changed to:
+
+``` text
+8081:8080
 ```
 
-A container that immediately exits should be investigated before testing the public endpoint.
+This allowed Jenkins and the application to run on the same EC2
+instance.
 
-## 5. Port listening
+------------------------------------------------------------------------
 
-On EC2:
+## 5. Application Container Exited
 
-```bash
-sudo ss -ltnp | grep 8081
+After the port issue was investigated, the application container was
+found to have exited.
+
+The container logs showed:
+
+``` text
+Error: Unable to access jarfile java-maven-app-1.0-SNAPSHOT.jar
 ```
 
-## 6. Local application test
+The Maven project was actually producing:
 
-From the EC2 instance:
-
-```bash
-curl -v http://localhost:8081
+``` text
+java-maven-app-1.1.0-SNAPSHOT.jar
 ```
 
-This separates application/container problems from AWS networking problems.
+The Dockerfile expected the wrong filename.
 
-## 7. External application test
+The Dockerfile was corrected to:
 
-From a browser:
-
-```text
-http://<EC2-PUBLIC-IP>:8081/
+``` dockerfile
+ENTRYPOINT ["java", "-jar", "java-maven-app-1.1.0-SNAPSHOT.jar"]
 ```
 
-If the local `curl` works but the browser cannot connect, investigate the Security Group, network path, or public addressing.
+This was a useful example of why container debugging should begin with
+the container logs rather than assuming the deployment command itself is
+the problem.
 
----
+------------------------------------------------------------------------
 
-# Troubleshooting Method
+# Troubleshooting Method Used
 
-The project deliberately uses a layered troubleshooting approach.
+The project also established a repeatable troubleshooting approach.
 
-When the application is unavailable, do not immediately change AWS networking.
+When a deployment fails:
 
-Work from the inside out:
-
-```text
-1. Is the container running?
-          |
-          v
-2. Does the application process start?
-          |
-          v
-3. Is the container port correct?
-          |
-          v
-4. Is the host port published?
-          |
-          v
-5. Is EC2 listening on that port?
-          |
-          v
-6. Does localhost work?
-          |
-          v
-7. Does the Security Group allow the port?
-          |
-          v
-8. Does the public endpoint work?
+``` text
+1. Check pipeline stage
+        |
+        v
+2. Read Jenkins console output
+        |
+        v
+3. Identify the exact failing command
+        |
+        v
+4. Reproduce/check the command manually
+        |
+        v
+5. Inspect Docker/container state
+        |
+        v
+6. Check container logs
+        |
+        v
+7. Check ports/processes
+        |
+        v
+8. Verify AWS networking/security rules
+        |
+        v
+9. Apply the smallest necessary fix
+        |
+        v
+10. Run the pipeline again
 ```
 
 Useful commands include:
 
-```bash
+``` bash
+docker ps
 docker ps -a
 docker logs demo-app
 docker inspect demo-app
-sudo ss -ltnp
+docker images
+docker pull <image>
+docker run ...
+```
+
+For host port investigation:
+
+``` bash
+sudo ss -ltnp | grep -E ':8081|:8080'
+```
+
+For application verification:
+
+``` bash
 curl -v http://localhost:8081
 ```
 
-This approach prevents infrastructure changes from masking application-level failures.
+This process is more useful than simply restarting containers repeatedly
+because each command provides evidence about a different part of the
+system.
 
----
+------------------------------------------------------------------------
 
-# Example Failure: JAR Filename Mismatch
+# System Design
 
-One of the practical failures encountered during development was a mismatch between the Maven artifact version and the Docker entrypoint.
+The detailed architecture and engineering decisions for this project are
+documented separately in:
 
-Maven produced:
-
-```text
-java-maven-app-1.1.0-SNAPSHOT.jar
+``` text
+docs/system-design.md
 ```
 
-while the Dockerfile attempted to start:
+That document covers:
 
-```text
-java-maven-app-1.0-SNAPSHOT.jar
+-   component relationships
+-   Jenkins container architecture
+-   Docker socket access
+-   CI/CD flow
+-   registry flow
+-   EC2 deployment
+-   network ports
+-   credentials
+-   security considerations
+-   architectural trade-offs
+-   future improvements
+
+------------------------------------------------------------------------
+
+# Deployment Documentation
+
+The practical deployment procedure is documented in:
+
+``` text
+docs/deployment.md
 ```
 
-The result was:
+It focuses on the actual steps required to reproduce the environment
+rather than screenshots.
 
-```text
-Error: Unable to access jarfile java-maven-app-1.0-SNAPSHOT.jar
+------------------------------------------------------------------------
+
+# Troubleshooting Documentation
+
+The troubleshooting record is documented in:
+
+``` text
+docs/troubleshooting.md
 ```
 
-Docker itself was functioning. The image was created. The container could be started.
+It captures the actual problems encountered while building the project,
+the evidence used to diagnose them, and the resulting fixes.
 
-The failure occurred at the application startup layer.
+This is intentionally based on real implementation experience rather
+than invented examples.
 
-The fix was to make the Docker entrypoint match the actual artifact produced by Maven.
-
-This illustrates an important CI/CD principle:
-
-> A successful image build does not necessarily mean a successful application deployment.
-
-The artifact must also be compatible with the runtime command used by the container.
-
----
-
-# Example Failure: Docker Port Collision
-
-Another failure occurred when the deployment attempted:
-
-```bash
-docker run -d --name demo-app -p 8080:8080 ...
-```
-
-The EC2 host was already using port `8080` for Jenkins.
-
-Docker therefore reported that the port was already allocated.
-
-The solution was to separate the host-facing ports:
-
-```text
-Jenkins     -> EC2 :8080
-Application -> EC2 :8081
-```
-
-while keeping the application listening on:
-
-```text
-Container :8080
-```
-
-This distinction between host and container ports is fundamental when multiple services share one host.
-
----
-
-# Project Evolution
-
-This repository is organized as a progression rather than a single final architecture.
-
-## Part I — Jenkins + SSH + EC2 + Docker
-
-The first stage establishes the basic automated deployment path:
-
-```text
-GitHub
-  |
-  v
-Jenkins
-  |
-  | Build
-  v
-Docker Image
-  |
-  | Push
-  v
-Docker Hub
-  |
-  | SSH
-  v
-EC2
-  |
-  v
-Docker Container
-```
-
-This is the current foundation of the project.
-
----
-
-## Part II — Docker Compose + ECR
-
-The next stage introduces:
-
-- Docker Compose
-- Amazon ECR
-- More structured deployment configuration
-- Separation of image storage from the current Docker Hub workflow
-- Deployment logic extracted into reusable scripts
-
-Conceptually:
-
-```text
-GitHub
-  |
-  v
-Jenkins
-  |
-  +--> Build
-  |
-  +--> Test
-  |
-  +--> Docker Build
-  |
-  +--> Push to ECR
-          |
-          v
-        EC2
-          |
-          v
-   Docker Compose
-          |
-          v
-     Application
-```
-
-This stage should only be described as implemented once the repository actually contains and uses the corresponding Compose and ECR configuration.
-
----
-
-## Part III — Dynamic Image Versioning
-
-The final progression introduces build-specific image versions.
-
-Instead of depending on one mutable tag, the pipeline can associate an image with a Jenkins build or application version.
-
-For example:
-
-```text
-Build 101
-    |
-    v
-demo-app:101
-```
-
-or:
-
-```text
-demo-app:<application-version>
-```
-
-This makes deployments easier to identify and creates a foundation for controlled rollbacks.
-
----
-
-# Why Dynamic Versioning Matters
-
-A static image tag makes it difficult to answer a simple operational question:
-
-> Which exact build is running in production?
-
-Versioned images make that relationship more explicit:
-
-```text
-Source Commit
-      |
-      v
-Jenkins Build
-      |
-      v
-Application Version
-      |
-      v
-Docker Image Tag
-      |
-      v
-Deployment
-```
-
-That relationship becomes increasingly important as deployment frequency increases.
-
----
-
-# Multi-Branch Pipeline
-
-The repository uses a Jenkins Multibranch Pipeline.
-
-Instead of configuring each branch as a completely separate Jenkins job, Jenkins can discover branches containing a pipeline definition.
-
-Conceptually:
-
-```text
-GitHub Repository
-       |
-       +── main
-       |     └── Jenkinsfile
-       |
-       +── feature/*
-       |     └── Jenkinsfile
-       |
-       └── other branches
-             └── Jenkinsfile
-```
-
-This provides a foundation for branch-based CI workflows and makes the Jenkins configuration closer to the repository structure.
-
----
-
-# Security Considerations
-
-CI/CD systems connect source code, credentials, build infrastructure, registries, and deployment environments.
-
-Important practices demonstrated or reinforced by this project include:
-
-- Store secrets in Jenkins Credentials rather than source code.
-- Do not commit passwords, access tokens, or private keys.
-- Use dedicated credentials for different systems.
-- Keep EC2 Security Group rules as restrictive as practical.
-- Avoid unnecessary administrative permissions.
-- Treat access to the Docker socket as privileged.
-- Use appropriate AWS IAM permissions when AWS services are introduced.
-- Do not expose registry credentials in build logs.
-- Separate application configuration from secret values.
-- Verify exactly which credentials each pipeline stage requires.
-
----
+------------------------------------------------------------------------
 
 # Engineering Lessons
 
-## 1. A pipeline is a chain of dependencies
+The project reinforced several engineering principles.
 
-A successful deployment depends on several independent components working together:
+## 1. A pipeline is a system, not just a Jenkinsfile
 
-```text
-Git
- ↓
+A working CI/CD pipeline depends on several connected systems:
+
+``` text
+Source Control
+      +
+Build Tool
+      +
 Jenkins
- ↓
-Maven
- ↓
-JAR
- ↓
+      +
 Docker
- ↓
+      +
 Registry
- ↓
+      +
 SSH
- ↓
-EC2
- ↓
-Container
- ↓
+      +
+Cloud Infrastructure
+      +
 Application
 ```
 
-A failure anywhere in the chain can appear as an application availability problem.
+A failure in any one of these can stop the deployment.
 
----
+------------------------------------------------------------------------
 
-## 2. Read the failure at the layer where it occurs
+## 2. Logs are evidence
+
+Instead of guessing:
+
+``` text
+"What might be wrong?"
+```
+
+the better question is:
+
+``` text
+"What evidence do I have?"
+```
 
 For example:
 
-```text
-"Unable to access jarfile"
+``` text
+docker logs demo-app
 ```
 
-points toward the application/container image.
+immediately revealed the incorrect JAR filename.
 
-It does not immediately point toward AWS networking.
+------------------------------------------------------------------------
 
-Likewise:
+## 3. Host ports and container ports are different
 
-```text
-"port is already allocated"
+The project made the distinction between:
+
+``` text
+host port
 ```
 
-points toward host-level port usage.
+and:
 
-The error message determines the next layer to inspect.
-
----
-
-## 3. Build success and runtime success are different
-
-Docker can successfully build an image that later fails immediately when the container starts.
-
-Therefore:
-
-```text
-docker build succeeded
+``` text
+container port
 ```
 
-does not prove:
+explicit.
 
-```text
-application is running
+The application listens on:
+
+``` text
+8080
 ```
 
-Runtime verification is part of deployment.
+inside the container.
 
----
+The EC2 host exposes:
 
-## 4. Host ports and container ports solve different problems
+``` text
+8081
+```
 
-This project uses:
+to the outside world.
 
-```text
+The mapping is:
+
+``` text
 8081:8080
 ```
 
-which means:
+------------------------------------------------------------------------
 
-```text
-HOST:CONTAINER
+## 4. Containers do not remove the need for debugging
+
+A container can be:
+
+``` text
+created
 ```
 
-The application still runs on port `8080` inside the container.
+but still:
 
-Port `8081` exists so the EC2 host can expose the application without conflicting with Jenkins on host port `8080`.
-
----
-
-## 5. Automation should reduce manual repetition, not hide system behavior
-
-The purpose of Jenkins is not simply to eliminate typing.
-
-A useful pipeline makes the delivery process repeatable while still making each stage understandable:
-
-```text
-Build
-→ Package
-→ Containerize
-→ Publish
-→ Deploy
-→ Verify
+``` text
+exited
 ```
 
-That understanding becomes important when the automation fails.
+Therefore:
 
----
-
-# Current Project Status
-
-## Current implementation
-
-The repository currently demonstrates:
-
-- GitHub source control
-- Jenkins Multibranch Pipeline
-- Maven application packaging
-- Spring Boot application
-- Docker image creation
-- Docker Hub image publishing
-- Jenkins-managed credentials
-- SSH-based EC2 deployment
-- Docker-based application deployment
-- EC2 host port `8081` mapped to container port `8080`
-- Layered deployment troubleshooting
-
-## Progressive improvements documented in this repository
-
-The project progression also introduces:
-
-- Docker Compose
-- Amazon ECR
-- Dynamic image versioning
-- More structured deployment configuration
-
-These should be considered separate implementation stages and should only be marked as completed when their corresponding configuration is actually active in the repository.
-
----
-
-# Current Deployment Contract
-
-For the current application deployment, the important values are:
-
-```text
-Application artifact:
-java-maven-app-1.1.0-SNAPSHOT.jar
-
-Docker image:
-pierrechukason/demo-app.jma-1.1
-
-Application container:
-demo-app
-
-Container port:
-8080
-
-EC2 host port:
-8081
-
-Jenkins host port:
-8080
+``` bash
+docker ps
 ```
 
-The resulting traffic path is:
+alone is not always enough.
 
-```text
-Browser
-   |
-   | :8081
-   v
-EC2
-   |
-   | Docker port mapping
-   v
-demo-app :8080
-   |
-   v
-Spring Boot
+For failed containers:
+
+``` bash
+docker ps -a
+docker logs <container>
 ```
 
----
+are essential.
 
-# Verification Checklist
+------------------------------------------------------------------------
 
-Before considering a deployment complete:
+## 5. Infrastructure configuration and application configuration interact
 
-- [ ] Git commit pushed
-- [ ] Jenkins discovered the change
-- [ ] Source checkout succeeded
-- [ ] Maven build succeeded
-- [ ] Expected JAR was created
-- [ ] Docker image built successfully
-- [ ] Image was pushed to the registry
-- [ ] Jenkins successfully connected to EC2
-- [ ] EC2 pulled the expected image
-- [ ] Previous application container was removed/replaced
-- [ ] New `demo-app` container is running
-- [ ] Port mapping shows `8081->8080`
-- [ ] Application logs show successful startup
-- [ ] `curl http://localhost:8081` succeeds
-- [ ] EC2 Security Group permits TCP `8081`
-- [ ] Public endpoint is reachable
+The port collision demonstrated that application deployment cannot be
+considered separately from the infrastructure already running on the
+server.
 
----
+Jenkins occupied port `8080`.
 
-# Related Documentation
+The application therefore needed a different host port.
 
-Detailed operational information is kept in the `docs/` directory.
+This is one example of why deployment architecture matters.
 
-Recommended documentation responsibilities:
+------------------------------------------------------------------------
 
-| Document | Purpose |
-|---|---|
-| `deployment.md` | How the application is deployed and verified |
-| `troubleshooting.md` | Failure symptoms, evidence, diagnosis, and fixes |
-| `lessons-learned.md` | Engineering lessons and decisions from the project |
-| `screenshots.md` | Evidence and explanation of important screenshots |
-| `publishing-checklist.md` | Repository/portfolio publishing checklist |
+# Security Considerations
 
-The README explains the system as a whole. The documents above should contain details that would otherwise make the README unnecessarily long.
+This project is primarily a learning environment.
 
----
+Some design choices are intentionally simple so the complete CI/CD flow
+can be understood.
 
-# What This Project Taught Me
+For a production environment, additional controls would be appropriate.
 
-The most useful part of this project has not been learning individual commands.
+Examples include:
 
-It has been learning to trace a deployment across boundaries.
+-   restricting SSH access
+-   using least-privilege IAM
+-   protecting Jenkins
+-   avoiding unnecessary public ports
+-   using HTTPS/TLS
+-   using a managed container registry
+-   scanning container images
+-   rotating credentials
+-   using secrets management
+-   separating CI and production infrastructure
+-   using dedicated deployment identities
+-   implementing stronger network segmentation
+-   adding monitoring and alerting
 
-A request that looks like:
+The Docker socket approach also requires careful consideration because
+access to the host Docker daemon can provide significant control over
+the host.
 
-```text
-"The application is not opening"
-```
+------------------------------------------------------------------------
 
-can actually originate from:
+# Current Implementation
 
-```text
-Source code
-    ↓
-Build artifact
-    ↓
-Dockerfile
-    ↓
-Docker image
-    ↓
-Container startup
-    ↓
-Port mapping
-    ↓
-EC2
-    ↓
-Security Group
-    ↓
-Public network
-```
+The implementation practiced in this repository is:
 
-The practical skill is being able to identify which layer is actually failing before changing configuration elsewhere.
-
-That is the foundation this project is intended to demonstrate.
-
----
-
-# Project Outcome
-
-This repository represents a progression from manually deploying a containerized application on EC2 toward a repeatable CI/CD workflow.
-
-The current working foundation is:
-
-```text
+``` text
 GitHub
-   ↓
+   |
+   v
 Jenkins Multibranch Pipeline
-   ↓
+   |
+   v
 Maven
-   ↓
-Docker
-   ↓
+   |
+   v
+Docker Build
+   |
+   v
 Docker Hub
-   ↓
+   |
+   v
 SSH
-   ↓
+   |
+   v
 Amazon EC2
-   ↓
-Docker
-   ↓
+   |
+   v
+Docker Container
+   |
+   v
 Spring Boot Application
 ```
 
-The next stages extend the same delivery chain with:
+### Current image
 
-```text
-Docker Compose
-+
-Amazon ECR
-+
-Dynamic Image Versioning
+``` text
+pierrechukason/demo-app.jma-1.1
 ```
 
-The overall objective is to build a deployment process that is repeatable, observable, and easier to troubleshoot as the system becomes more sophisticated.
+### Current application container
+
+``` text
+demo-app
+```
+
+### Current application mapping
+
+``` text
+8081:8080
+```
+
+### Jenkins
+
+``` text
+8080
+```
+
+------------------------------------------------------------------------
+
+# Progressive Improvements
+
+The current implementation provides the complete learning path for the
+project.
+
+There are also several natural next steps.
+
+These are improvements to the architecture rather than claims about the
+current implementation.
+
+## Next Stage --- Docker Compose
+
+Docker Compose could be introduced to manage multiple services and make
+local or server-side service configuration easier.
+
+Possible direction:
+
+``` text
+Docker Compose
+   |
+   +--> Jenkins
+   |
+   +--> Application
+   |
+   +--> Supporting Services
+```
+
+------------------------------------------------------------------------
+
+## Next Stage --- Amazon ECR
+
+Docker Hub can later be replaced or supplemented by Amazon Elastic
+Container Registry.
+
+Possible flow:
+
+``` text
+GitHub
+   |
+   v
+Jenkins
+   |
+   v
+Docker Build
+   |
+   v
+Amazon ECR
+   |
+   v
+Amazon EC2 / ECS / EKS
+```
+
+This would also connect naturally with the next phase of AWS and
+Kubernetes learning.
+
+------------------------------------------------------------------------
+
+## Next Stage --- Dynamic Image Versioning
+
+The current project uses a fixed image tag:
+
+``` text
+pierrechukason/demo-app.jma-1.1
+```
+
+A future implementation could generate tags from:
+
+-   Git commit SHA
+-   build number
+-   application version
+-   release version
+
+For example:
+
+``` text
+demo-app:<git-commit>
+```
+
+This would improve traceability between a deployed container and the
+source code that produced it.
+
+------------------------------------------------------------------------
+
+# Multi-Branch Pipeline
+
+The Jenkins job is configured as a Multibranch Pipeline.
+
+The purpose is to allow Jenkins to discover branches and execute the
+pipeline according to the Jenkinsfile associated with each branch.
+
+Conceptually:
+
+``` text
+GitHub
+│
+├── main
+│     └── Jenkinsfile
+│
+├── development
+│     └── Jenkinsfile
+│
+└── feature/*
+      └── Jenkinsfile
+```
+
+This becomes increasingly useful as development workflows become more
+complex.
+
+------------------------------------------------------------------------
+
+# Verification Checklist
+
+After a successful deployment, the following can be checked.
+
+### Source
+
+``` bash
+git status
+git log
+```
+
+### Jenkins
+
+Confirm that:
+
+``` text
+init
+build jar
+build image
+deploy
+```
+
+complete successfully.
+
+### Docker
+
+``` bash
+docker ps
+```
+
+Confirm that:
+
+``` text
+demo-app
+```
+
+is running.
+
+### Container logs
+
+``` bash
+docker logs demo-app
+```
+
+Confirm that the application starts successfully.
+
+### Port mapping
+
+``` bash
+docker port demo-app
+```
+
+Expected mapping:
+
+``` text
+8080/tcp -> 0.0.0.0:8081
+```
+
+### Application
+
+From the EC2 server:
+
+``` bash
+curl -v http://localhost:8081
+```
+
+From an allowed external network:
+
+``` text
+http://<EC2-PUBLIC-IP>:8081/
+```
+
+------------------------------------------------------------------------
+
+# Documentation Structure
+
+The repository documentation is intentionally organized around the
+engineering work:
+
+``` text
+docs/
+├── deployment.md
+├── troubleshooting.md
+├── lessons-learned.md
+├── publishing-checklist.md
+└── system-design.md
+```
+
+### `deployment.md`
+
+How the environment was configured and how deployment works.
+
+### `troubleshooting.md`
+
+Actual failures, diagnostic evidence, root causes, and fixes.
+
+### `lessons-learned.md`
+
+Engineering lessons extracted from the implementation.
+
+### `publishing-checklist.md`
+
+Checklist for preparing the repository and project for public
+presentation.
+
+### `system-design.md`
+
+Detailed architecture, component relationships, design decisions,
+trade-offs, and future evolution.
+
+------------------------------------------------------------------------
+
+# Project Status
+
+## Completed
+
+-   [x] Java/Maven application
+-   [x] Git/GitHub integration
+-   [x] Jenkins Multibranch Pipeline
+-   [x] Maven build automation
+-   [x] Docker image build
+-   [x] Docker Hub publishing
+-   [x] Jenkins running in Docker
+-   [x] Jenkins Docker CLI configuration
+-   [x] Docker socket integration
+-   [x] Docker permissions configuration
+-   [x] SSH deployment to EC2
+-   [x] Docker container deployment
+-   [x] Application port mapping
+-   [x] AWS Security Group configuration
+-   [x] End-to-end pipeline practice
+-   [x] Troubleshooting and recovery
+-   [x] Project documentation
+
+## Future Improvements
+
+-   [ ] Docker Compose
+-   [ ] Amazon ECR
+-   [ ] Dynamic image tagging
+-   [ ] Image scanning
+-   [ ] HTTPS/TLS
+-   [ ] Stronger secrets management
+-   [ ] More granular IAM permissions
+-   [ ] Monitoring and alerting
+-   [ ] More production-oriented deployment architecture
+
+------------------------------------------------------------------------
+
+# What This Project Demonstrates
+
+This repository is more than a Jenkins configuration.
+
+It demonstrates practical understanding of the path from:
+
+``` text
+Source Code
+     |
+     v
+Build
+     |
+     v
+Artifact
+     |
+     v
+Container Image
+     |
+     v
+Registry
+     |
+     v
+Remote Infrastructure
+     |
+     v
+Running Application
+```
+
+It also demonstrates the debugging required when those layers do not
+initially work together.
+
+The most important outcome of the project was not simply getting a green
+Jenkins pipeline.
+
+It was learning how to move from:
+
+``` text
+failure
+   |
+   v
+evidence
+   |
+   v
+diagnosis
+   |
+   v
+fix
+   |
+   v
+verification
+```
+
+That troubleshooting loop is an important part of practical DevOps work.
+
+------------------------------------------------------------------------
+
+# Related Documentation
+
+-   `docs/system-design.md`
+-   `docs/deployment.md`
+-   `docs/troubleshooting.md`
+-   `docs/lessons-learned.md`
+-   `docs/publishing-checklist.md`
+
+------------------------------------------------------------------------
+
+# Author
+
+**Chukwuemeka Peter Eze**
+
+DevOps / Cloud Engineering Learning Portfolio
+
+GitHub:
+
+``` text
+https://github.com/Chukwuemeka-Peter-Eze/aws-jenkins-ec2-cicd-pipeline
+```
+
+------------------------------------------------------------------------
+
+# Final Note
+
+This project was built as a hands-on learning implementation.
+
+The goal was not to reproduce a production platform in one repository.
+
+The goal was to understand the individual components, connect them into
+a working delivery path, encounter real integration problems,
+investigate those problems, and document the engineering decisions
+behind the final implementation.
+
+The next step is to continue evolving the architecture toward more
+production-oriented AWS, container, Kubernetes, security, observability,
+and automation patterns.

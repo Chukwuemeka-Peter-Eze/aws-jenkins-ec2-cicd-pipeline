@@ -1,1132 +1,242 @@
-# AWS Jenkins CI/CD Pipeline - Troubleshooting Guide
+# Troubleshooting Log
 
-## 1. Purpose
+This document records the real failures encountered while building this
+pipeline, the evidence used to diagnose each one, and the fix applied. It is
+written as a reference for reproducing the same environment without hitting
+the same walls blind, and as a demonstration of a repeatable diagnostic
+method, not just a list of fixes.
 
-This guide provides a structured troubleshooting process for the AWS Jenkins CI/CD deployment pipeline.
+---
 
-The project progresses through three deployment stages:
+## Diagnostic Method Used Throughout
 
 ```text
-Part I
-Jenkins → SSH → EC2 → Docker
-
-Part II
-Jenkins → Docker → ECR → EC2 → Docker Compose
-
-Part III
-Jenkins → Versioning → ECR → EC2 → Docker Compose
+1. Check pipeline stage
+        |
+        v
+2. Read Jenkins console output
+        |
+        v
+3. Identify the exact failing command
+        |
+        v
+4. Reproduce/check the command manually
+        |
+        v
+5. Inspect Docker/container state
+        |
+        v
+6. Check container logs
+        |
+        v
+7. Check ports/processes
+        |
+        v
+8. Verify AWS networking/security rules
+        |
+        v
+9. Apply the smallest necessary fix
+        |
+        v
+10. Run the pipeline again
 ```
 
-The AWS project material identifies Jenkins SSH Agent, EC2 SSH credentials, Docker, Docker Compose, ECR, multi-branch pipelines, and dynamic versioning as the major components of the workflow.
+The core principle: **don't guess, gather evidence.** Every issue below was
+resolved by running a diagnostic command, not by speculating about the
+cause.
 
 ---
 
-# 2. Troubleshooting Philosophy
+## Issue 1: Jenkins Could Not Run Docker Commands
 
-Do not immediately change configuration when a pipeline fails.
+**Symptom:** The `build image` stage failed immediately, unable to find or
+execute the `docker` command from inside the Jenkins container.
 
-Use this sequence:
+**Root cause:** The stock `jenkins/jenkins:lts` image does not ship with the
+Docker CLI. Jenkins itself was running inside a container, so it had no
+Docker binary to call in the first place.
 
+**Diagnosis:**
+```bash
+docker exec -it jenkins which docker
+# no such file, confirms CLI is missing
+```
+
+**Fix:** Built a custom Jenkins image that installs `docker.io` on top of
+the base image (see `deployment.md` §4).
+
+**Architecture before → after:**
 ```text
-Observe
-   ↓
-Identify failing stage
-   ↓
-Read logs
-   ↓
-Identify affected component
-   ↓
-Test component independently
-   ↓
-Apply one change
-   ↓
-Rerun
-   ↓
-Verify
+Before:                      After:
+Jenkins Container             Jenkins Container
+      X                             |
+   Docker                           v
+                              Docker CLI
+                                    |
+                                    v
+                         Host Docker Socket
+                                    |
+                                    v
+                             Docker Engine
 ```
 
-The most important question is:
-
-> **What is the first stage that actually failed?**
-
-Everything after that point may simply be a consequence of the earlier failure.
+**Prevention:** When Jenkins runs inside a container, always confirm
+up front whether it needs to *build* Docker images (needs CLI + socket
+access) or merely *deploy* already-built images (may only need SSH).
 
 ---
 
-# 3. Pipeline Failure Map
+## Issue 2: Docker Socket Permission Problem
 
-Use the following pipeline as the primary troubleshooting map:
+**Symptom:** Even after installing the Docker CLI, Docker commands issued
+from inside the Jenkins container failed with a permission error when
+talking to `/var/run/docker.sock`.
 
-```text
-Source Checkout
-      │
-      ▼
-Jenkins
-      │
-      ├── Build
-      │
-      ├── Test
-      │
-      ├── Docker Build
-      │
-      ├── Versioning
-      │
-      ├── ECR Authentication
-      │
-      ├── ECR Push
-      │
-      ├── SSH
-      │
-      ├── ECR Pull
-      │
-      ├── Docker Compose
-      │
-      └── Application
+**Root cause:** Installing the CLI does not grant permission to use it.
+The `jenkins` user inside the container was not a member of the group that
+owns the host's Docker socket.
+
+**Diagnosis:**
+```bash
+ls -l /var/run/docker.sock
+# shows the socket's owning group and permission bits
+getent group docker
+# shows the GID of the docker group on the HOST
 ```
 
-Find the first failed stage and start there.
+**Fix:** Started the Jenkins container with `--group-add <host-docker-gid>`
+so the Jenkins process's effective group membership matches the group that
+owns the socket, without loosening the socket's own permissions (e.g.
+avoiding `chmod 666` on the socket, which would be a much broader
+exposure).
+
+**Lesson reinforced:**
+> Installing a CLI does not automatically provide access to the service
+> that CLI controls.
 
 ---
 
-# 4. Jenkins Pipeline Does Not Start
+## Issue 3: Docker Hub Credential Problem
 
-## Symptoms
+**Symptom:** The `deploy` stage failed at the `docker push` step with an
+authentication error.
 
-* Pipeline does not execute.
-* Branch is not discovered.
-* Jenkins shows no build.
-* Jenkinsfile changes do not appear.
+**Root cause:** The pipeline referenced a Jenkins credential ID
+(`docker-hub-repo`) that did not yet exist in Jenkins's credential store,
+it had been assumed to be present rather than explicitly created.
 
-## Checks
+**Diagnosis:** Jenkins console output showed a credential lookup failure
+referencing the missing ID directly, which made this one of the faster
+issues to pinpoint once the console log was actually read line by line
+rather than skimmed.
 
-Confirm:
+**Fix:** Created the credential in **Manage Jenkins → Credentials** with
+the exact ID `docker-hub-repo`, type "Username with password", using a
+Docker Hub access token rather than the account password.
 
-* Jenkins is running.
-* The correct repository is configured.
-* The correct branch is available.
-* The Jenkinsfile exists in the expected location.
-* The multi-branch pipeline is configured correctly.
-* Jenkins can access the source repository.
-
-The project material identifies execution of a multi-branch pipeline as part of the initial Jenkins deployment stage.
-
----
-
-# 5. Jenkins Cannot Access the Repository
-
-## Symptoms
-
-The pipeline fails during checkout.
-
-Possible causes include:
-
-* Incorrect repository URL
-* Invalid credentials
-* Repository access restrictions
-* Incorrect branch configuration
-* Network connectivity problems
-
-## Troubleshooting
-
-Check the Jenkins job configuration.
-
-Verify the repository URL.
-
-Verify that the credentials configured in Jenkins are the credentials intended for repository access.
-
-Do not place repository credentials directly into the Jenkinsfile.
+**Prevention:** Keep a single source of truth (see `deployment.md` §5) for
+every credential ID the pipeline expects, and treat a credential ID as part
+of the pipeline's "API contract" — renaming it in Jenkins without updating
+the Jenkinsfile (or vice versa) breaks the pipeline the same way a typo
+would.
 
 ---
 
-# 6. Jenkinsfile Not Found
+## Issue 4: Host Port Collision
 
-## Symptoms
+**Symptom:** The application container failed to start (or immediately
+exited) when deployed with `-p 8080:8080`.
 
-Jenkins discovers the repository but cannot find the pipeline definition.
+**Root cause:** Jenkins itself was already bound to host port `8080`
+(`-p 8080:8080` in the Jenkins `docker run` command). Docker cannot bind two
+processes to the same host port.
 
-## Checks
-
-Confirm that:
-
-```text
-Jenkinsfile
+**Diagnosis:**
+```bash
+sudo ss -ltnp | grep :8080
+# shows Jenkins already listening on 8080
 ```
 
-exists in the expected repository location.
-
-Check:
-
-```text
-Repository
-   │
-   └── Jenkinsfile
-```
-
-Also confirm that the configured pipeline script path matches the actual file location.
-
----
-
-# 7. Jenkins Build Stage Fails
-
-## Symptoms
-
-The pipeline starts but fails during the application build.
-
-## Investigation
-
-Start with the Jenkins console output.
-
-Determine:
-
-* Which command failed?
-* Which directory was Jenkins operating in?
-* Were required files available?
-* Were required dependencies installed?
-* Did the build command return a non-zero exit code?
-
-Do not troubleshoot Docker or ECR until the application build itself succeeds.
-
-The correct sequence is:
-
-```text
-Application Build
-      │
-      ▼
-Successful?
-   ┌──┴──┐
-  No    Yes
-  │      │
-Fix     Continue
-Build
-```
-
----
-
-# 8. Docker Build Fails
-
-## Symptoms
-
-The Jenkins pipeline reaches the Docker build stage but fails to create the image.
-
-## Checks
-
-Verify:
-
-* `Dockerfile` exists.
-* Dockerfile path is correct.
-* Build context is correct.
-* Required application files exist.
-* Docker is available to Jenkins.
-* The Docker command is syntactically correct.
-
-Test independently where appropriate:
+**Fix:** Remapped the application to host port `8081` while keeping the
+container-internal port at `8080`:
 
 ```bash
-docker build .
+docker run -d --name demo-app -p 8081:8080 pierrechukason/demo-app.jma-1.1
 ```
 
-If the same command fails outside Jenkins, the issue is likely related to the Docker build rather than Jenkins.
+**Resulting mapping:**
+```text
+Jenkins:      EC2:8080  -> Jenkins container:8080
+Application:  EC2:8081  -> demo-app container:8080
+```
+
+**Prevention:** Before assigning a host port to any new service on a shared
+box, check what is already listening with `ss -ltnp` rather than assuming a
+port is free because it's the application's "default."
 
 ---
 
-# 9. Jenkins Cannot Execute Docker
+## Issue 5: Application Container Exited Immediately
 
-## Symptoms
+**Symptom:** After resolving the port collision, `docker ps` showed no
+running `demo-app` container. `docker ps -a` showed it in an `Exited`
+state.
 
-Jenkins reports that Docker cannot be found or executed.
+**Root cause:** The Dockerfile's `ENTRYPOINT` referenced a hardcoded JAR
+filename (`java-maven-app-1.0-SNAPSHOT.jar`) that no longer matched what
+Maven was actually producing (`java-maven-app-1.1.0-SNAPSHOT.jar`), after
+the project version was bumped in `pom.xml`.
 
-Possible causes:
-
-* Docker is not installed.
-* Jenkins does not have permission to access Docker.
-* Docker is not available in Jenkins' execution environment.
-* PATH configuration differs between interactive and Jenkins sessions.
-
-## Investigation
-
-Check Docker availability from the environment where Jenkins executes commands.
-
-For example:
-
+**Diagnosis:**
 ```bash
-docker --version
+docker ps -a
+# demo-app shown as Exited (1)
+
+docker logs demo-app
+# Error: Unable to access jarfile java-maven-app-1.0-SNAPSHOT.jar
 ```
 
-Then:
+**Fix:** Updated the Dockerfile `ENTRYPOINT` to match the actual artifact
+name:
+
+```dockerfile
+ENTRYPOINT ["java", "-jar", "java-maven-app-1.1.0-SNAPSHOT.jar"]
+```
+
+**Prevention:** Whenever `pom.xml`'s `<version>` changes, treat the
+Dockerfile's hardcoded JAR filename as a dependent artifact that must be
+updated in the same change or better, parameterize it via a build arg so
+it can never drift silently (see `system-design.md` → *Future
+Improvements*).
+
+---
+
+## Quick Reference: Useful Diagnostic Commands
 
 ```bash
+# Container state
 docker ps
-```
-
-The two commands help distinguish between Docker installation and Docker access problems.
-
----
-
-# 10. SSH Connection to EC2 Fails
-
-## Symptoms
-
-The Jenkins pipeline reaches the deployment stage but cannot connect to EC2.
-
-Possible causes:
-
-* Incorrect SSH credential
-* Incorrect username
-* Incorrect host
-* EC2 instance unavailable
-* Security Group restriction
-* SSH service problem
-* Incorrect key configuration
-
-The project material specifically identifies the Jenkins SSH Agent plugin and EC2 SSH credentials as part of Part I.
-
----
-
-# 11. SSH Credential Problems
-
-## Symptoms
-
-Jenkins reports authentication or key-related errors.
-
-## Checks
-
-Verify:
-
-* Correct Jenkins credential is selected.
-* Correct private key is stored.
-* Correct EC2 username is being used.
-* Credential ID matches the Jenkinsfile configuration.
-* The key corresponds to the EC2 instance.
-
-Do not solve credential problems by placing the private key directly inside the repository.
-
----
-
-# 12. EC2 Security Group Blocks SSH
-
-## Symptoms
-
-Jenkins cannot establish the SSH connection even though the credential appears correct.
-
-Check the EC2 Security Group.
-
-Confirm that SSH access is allowed from the intended source.
-
-Avoid using unrestricted access when a narrower rule is appropriate.
-
-The project includes Security Group configuration as part of the Jenkins deployment workflow.
-
----
-
-# 13. Jenkins Connects to EC2 but Commands Fail
-
-## Symptoms
-
-SSH succeeds, but deployment commands fail.
-
-This usually indicates that the SSH connection itself is not the problem.
-
-Investigate:
-
-```text
-SSH
- │
- ├── Successful
- │
- ▼
-Remote Command
- │
- └── Failed
-```
-
-Check:
-
-* Docker installation
-* Docker permissions
-* Working directory
-* File paths
-* Environment variables
-* Command syntax
-
----
-
-# 14. Docker Image Push to ECR Fails
-
-## Symptoms
-
-The image builds successfully but cannot be pushed to ECR.
-
-The workflow is:
-
-```text
-Docker Build
-     │
-     ▼
-Image
-     │
-     ▼
-ECR Authentication
-     │
-     ▼
-ECR Push
-```
-
-If the build succeeds but the push fails, focus on:
-
-* AWS authentication
-* ECR permissions
-* Repository name
-* Registry URI
-* Image tag
-* Network connectivity
-
----
-
-# 15. ECR Authentication Failure
-
-## Symptoms
-
-Jenkins cannot authenticate with ECR.
-
-Possible causes include:
-
-* Missing AWS permissions
-* Incorrect AWS credentials
-* Incorrect region
-* Incorrect registry configuration
-* Authentication command failure
-
-Verify the AWS/ECR configuration used by the pipeline.
-
-Do not expose AWS credentials in Jenkins console output.
-
----
-
-# 16. ECR Repository Does Not Exist
-
-## Symptoms
-
-The pipeline authenticates successfully but cannot push the image.
-
-Verify that the expected ECR repository exists.
-
-Check:
-
-```text
-AWS
- │
- └── ECR
-      │
-      └── Expected Repository
-```
-
-Also verify that the repository name used by Jenkins exactly matches the intended repository.
-
----
-
-# 17. Docker Image Tag Is Incorrect
-
-## Symptoms
-
-The image builds but the push or deployment references the wrong image.
-
-Check the image tag.
-
-Conceptually:
-
-```text
-<registry>/<repository>:<tag>
-```
-
-Verify each component:
-
-```text
-Registry
-Repository
-Tag
-```
-
-A mismatch between the tag generated during the build and the tag used during deployment can cause the EC2 deployment to retrieve the wrong image or fail to find the image.
-
----
-
-# 18. ECR Image Push Succeeds but EC2 Cannot Pull
-
-## Symptoms
-
-The image exists in ECR, but EC2 cannot retrieve it.
-
-Investigate:
-
-* EC2 AWS permissions
-* ECR authentication
-* Region configuration
-* Repository name
-* Image tag
-* Network connectivity
-* Docker availability
-
-The deployment path is:
-
-```text
-ECR
- │
- │ Pull
- ▼
-EC2
- │
- ▼
-Docker
-```
-
-Test each layer independently.
-
----
-
-# 19. Docker Pull Fails on EC2
-
-## Symptoms
-
-EC2 cannot retrieve the image.
-
-Verify:
-
-```bash
+docker ps -a
+docker logs <container>
+docker inspect <container>
+
+# Images
 docker images
-```
+docker pull <image>
 
-and inspect the exact image reference being requested.
+# Ports / processes
+sudo ss -ltnp | grep -E ':8081|:8080'
 
-Confirm that the image exists in ECR with the expected tag.
-
-If the image exists but the pull fails, investigate authentication and permissions before changing Docker configuration.
-
----
-
-# 20. Docker Compose Command Fails
-
-## Symptoms
-
-The pipeline reaches the deployment stage but Docker Compose fails.
-
-The project introduces Docker Compose in Part II.
-
-Check:
-
-* Docker Compose installation
-* Compose file location
-* Compose file syntax
-* Image reference
-* Port configuration
-* Environment configuration
-* Docker availability
-
-Verify the Compose installation:
-
-```bash
-docker compose version
+# Application reachability
+curl -v http://localhost:8081
 ```
 
 ---
 
-# 21. `docker-compose.yaml` Cannot Be Found
-
-## Symptoms
-
-The deployment host cannot locate the Compose configuration.
-
-Verify the working directory.
-
-The expected relationship is:
-
-```text
-Deployment Directory
-       │
-       └── docker-compose.yaml
-```
-
-The Jenkins deployment command must execute from the correct directory or provide the correct Compose file path.
-
----
-
-# 22. Docker Compose Starts but Application Fails
-
-## Symptoms
-
-Docker Compose executes successfully, but the application does not work.
-
-Do not immediately assume that Compose itself is broken.
-
-Separate the problem:
-
-```text
-Compose
-   │
-   ▼
-Container
-   │
-   ▼
-Application
-```
-
-If the container is running but the application is inaccessible, investigate the application runtime and network configuration.
-
----
-
-# 23. Container Starts but Application Is Not Accessible
-
-Check:
-
-* Container status
-* Port mapping
-* EC2 Security Group
-* Application listening address
-* Application listening port
-
-A common architecture is:
-
-```text
-Internet
-   │
-   ▼
-EC2 Security Group
-   │
-   ▼
-Host Port
-   │
-   ▼
-Container Port
-   │
-   ▼
-Application
-```
-
-A failure at any layer can prevent browser access.
-
----
-
-# 24. Browser Shows Connection Failure
-
-If the pipeline reports success but the application is inaccessible:
-
-### Step 1
-
-Confirm the EC2 instance is running.
-
-### Step 2
-
-Confirm the container is running.
-
-```bash
-docker ps
-```
-
-### Step 3
-
-Confirm the expected port mapping.
-
-### Step 4
-
-Review the EC2 Security Group.
-
-### Step 5
-
-Check application logs.
-
-### Step 6
-
-Test the application directly from the EC2 host where appropriate.
-
-The goal is to determine whether the problem is:
-
-```text
-Infrastructure
-      or
-Container
-      or
-Application
-      or
-Network
-```
-
----
-
-# 25. Jenkins Pipeline Succeeds but Deployment Is Wrong
-
-A green Jenkins pipeline does not automatically prove that the correct application version is running.
-
-Verify:
-
-```text
-Jenkins Build
-      │
-      ▼
-ECR Image
-      │
-      ▼
-EC2 Image
-      │
-      ▼
-Running Container
-      │
-      ▼
-Application
-```
-
-Confirm that the artifact produced by the successful Jenkins build is the artifact actually deployed.
-
----
-
-# 26. Dynamic Versioning Problems
-
-Dynamic versioning is introduced in Part III.
-
-## Symptoms
-
-* Version is missing.
-* Version is empty.
-* Incorrect image tag is generated.
-* ECR contains unexpected tags.
-* Deployment references an unavailable tag.
-
-## Investigation
-
-Trace the version through the pipeline:
-
-```text
-Version Generation
-       │
-       ▼
-Docker Tag
-       │
-       ▼
-ECR
-       │
-       ▼
-Deployment
-```
-
-The value generated by Jenkins must match the value used by the deployment stage.
-
----
-
-# 27. Wrong Version Deployed
-
-If Jenkins creates:
-
-```text
-application:103
-```
-
-but EC2 attempts to pull:
-
-```text
-application:102
-```
-
-the pipeline and deployment configuration are not synchronized.
-
-Verify that the same version flows through:
-
-```text
-Generate
-   ↓
-Tag
-   ↓
-Push
-   ↓
-Pull
-   ↓
-Deploy
-```
-
----
-
-# 28. Old Application Version Still Running
-
-If the new image exists in ECR but the old application remains active, investigate:
-
-* Image tag
-* Compose configuration
-* Running container
-* Deployment command
-* Container replacement behavior
-
-Confirm which image the running container is actually using.
-
-The important distinction is:
-
-```text
-Image Exists
-      ≠
-Image Is Running
-```
-
----
-
-# 29. Jenkins Credentials Exposed
-
-If credentials appear in:
-
-* Jenkins console logs
-* Jenkinsfile
-* Shell scripts
-* Docker Compose files
-* Git history
-* Screenshots
-
-treat the credential as compromised.
-
-Do not publish the affected value.
-
-Replace/revoke the credential as appropriate and remove sensitive information from the repository and evidence.
-
----
-
-# 30. Deployment Script Fails
-
-If deployment logic has been extracted into a shell script, isolate the script from Jenkins.
-
-The project material identifies this extraction as an improvement in Part II.
-
-Test the script independently where appropriate.
-
-Use:
-
-```text
-Jenkins
-   │
-   ▼
-Deployment Script
-   │
-   ├── Authentication
-   ├── Image Pull
-   ├── Compose
-   └── Verification
-```
-
-If the script fails outside Jenkins, the problem is likely in the deployment logic rather than Jenkins itself.
-
----
-
-# 31. Jenkinsfile Becomes Difficult to Debug
-
-Avoid putting every operation into one large Jenkinsfile.
-
-A useful separation is:
-
-```text
-Jenkinsfile
-     │
-     ├── Pipeline orchestration
-     │
-     └── Deployment script
-              │
-              ├── ECR
-              ├── Docker
-              └── Compose
-```
-
-This makes responsibilities clearer and simplifies troubleshooting.
-
----
-
-# 32. AWS Permission Problems
-
-If AWS operations fail, determine exactly which AWS action failed.
-
-Possible operations include:
-
-```text
-Authenticate
-    ↓
-Access ECR
-    ↓
-Push Image
-    ↓
-Pull Image
-```
-
-Do not respond to a permission error by granting unrestricted administrative access.
-
-Identify the required operation and review the relevant IAM permissions.
-
----
-
-# 33. Network Troubleshooting
-
-When an AWS service cannot be reached, distinguish between:
-
-```text
-DNS
- │
- ▼
-Network
- │
- ▼
-Security Group
- │
- ▼
-Application Port
- │
- ▼
-Application
-```
-
-Check the appropriate layer rather than changing multiple network settings at once.
-
----
-
-# 34. Jenkins Console Output
-
-The Jenkins console log should be treated as the primary evidence source for pipeline failures.
-
-When investigating:
-
-1. Find the first error.
-2. Identify the command that produced it.
-3. Identify the environment where it ran.
-4. Reproduce the command independently where appropriate.
-5. Fix the underlying issue.
-6. Rerun the pipeline.
-
-Avoid focusing only on the final error message because later stages may fail as a consequence of an earlier failure.
-
----
-
-# 35. Troubleshooting Decision Tree
-
-Use this simplified decision tree:
-
-```text
-Pipeline Failed?
-      │
-      ▼
-Which Stage?
-      │
-      ├── Checkout
-      │      └── Repository / Credentials
-      │
-      ├── Build
-      │      └── Application
-      │
-      ├── Docker Build
-      │      └── Dockerfile / Build Context
-      │
-      ├── Versioning
-      │      └── Jenkins Version Logic
-      │
-      ├── ECR Authentication
-      │      └── AWS Credentials / Permissions
-      │
-      ├── ECR Push
-      │      └── Repository / Tag / Permissions
-      │
-      ├── SSH
-      │      └── Credentials / Network / EC2
-      │
-      ├── ECR Pull
-      │      └── Authentication / Permissions / Tag
-      │
-      ├── Docker Compose
-      │      └── Compose / Configuration
-      │
-      └── Application
-             └── Runtime / Ports / Network
-```
-
----
-
-# 36. Part-by-Part Troubleshooting
-
-## Part I
-
-Focus on:
-
-```text
-Jenkins
-  ↓
-SSH
-  ↓
-EC2
-  ↓
-Docker
-  ↓
-Application
-```
-
-Primary issues:
-
-* Jenkins configuration
-* SSH credentials
-* Security Groups
-* Docker
-* Remote commands
-
----
-
-## Part II
-
-Focus on:
-
-```text
-Jenkins
-  ↓
-Docker
-  ↓
-ECR
-  ↓
-EC2
-  ↓
-Docker Compose
-  ↓
-Application
-```
-
-Additional issues:
-
-* ECR authentication
-* Image push
-* Image pull
-* Docker Compose
-* Compose configuration
-
----
-
-## Part III
-
-Focus on:
-
-```text
-Jenkins
-  ↓
-Version
-  ↓
-Docker
-  ↓
-ECR
-  ↓
-EC2
-  ↓
-Docker Compose
-```
-
-Additional issue:
-
-* Version consistency between build and deployment
-
----
-
-# 37. Evidence Collection
-
-When troubleshooting, capture evidence before changing configuration.
-
-Useful evidence includes:
-
-* Jenkins console output
-* Jenkins stage status
-* ECR repository contents
-* Docker image list
-* Docker container status
-* Docker Compose status
-* EC2 configuration
-* Security Group configuration
-* Application output
-* Browser behavior
-
-This evidence can also be used later in the project's technical documentation.
-
----
-
-# 38. What Not to Do
-
-Avoid these troubleshooting habits:
-
-### Do not blindly rerun the pipeline repeatedly.
-
-A failed pipeline usually requires investigation.
-
-### Do not change several components simultaneously.
-
-You will lose the ability to identify which change fixed the problem.
-
-### Do not expose credentials to diagnose authentication.
-
-Use secure credential mechanisms.
-
-### Do not immediately grant Administrator-level AWS permissions.
-
-Identify the required permission instead.
-
-### Do not assume a green pipeline means a healthy application.
-
-Verify the deployment independently.
-
----
-
-# 39. Final Troubleshooting Checklist
-
-```text
-[ ] Identify the first failed Jenkins stage
-[ ] Read the console output
-[ ] Identify the affected component
-[ ] Test the component independently
-[ ] Verify credentials
-[ ] Verify AWS permissions
-[ ] Verify EC2 availability
-[ ] Verify Security Group rules
-[ ] Verify Docker
-[ ] Verify ECR
-[ ] Verify image tags
-[ ] Verify Docker Compose
-[ ] Verify running containers
-[ ] Verify application ports
-[ ] Verify application behavior
-[ ] Apply one change
-[ ] Rerun pipeline
-[ ] Confirm resolution
-```
-
----
-
-# 40. Final Principle
-
-The most reliable troubleshooting strategy for this project is:
-
-```text
-Do not troubleshoot "Jenkins" as one system.
-
-Troubleshoot the pipeline stage.
-        ↓
-Identify the component.
-        ↓
-Collect evidence.
-        ↓
-Test the component.
-        ↓
-Fix the root cause.
-        ↓
-Verify the complete deployment.
-```
-
-The Jenkins pipeline is a chain:
-
-```text
-Source
-  ↓
-Build
-  ↓
-Docker
-  ↓
-Version
-  ↓
-ECR
-  ↓
-EC2
-  ↓
-Docker Compose
-  ↓
-Application
-```
-
-A failure anywhere in that chain should be isolated to its specific stage before changes are made.
+## General Principle
+
+Across all five issues, the pattern was the same: **the fix was never
+guessed, it was read off a log, a port listing, or a container inspect
+output.** Restarting a container or re-running the pipeline without first
+gathering evidence only re-produces the same failure with less information
+than the first time.
