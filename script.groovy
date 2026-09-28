@@ -1,4 +1,4 @@
-```groovy
+groovy
 def buildJar() {
 
     echo 'building the application...'
@@ -33,13 +33,14 @@ def deployApp() {
 
     sshagent(credentials: ['ec2-server-key']) {
 
-        sh
+        sh '''
             ssh -o StrictHostKeyChecking=no ubuntu@54.209.6.238 "
                 docker pull pierrechukason/demo-app.jma-1.1 &&
                 docker stop demo-app || true &&
                 docker rm demo-app || true &&
                 docker run -d --name demo-app -p 8080:8080 pierrechukason/demo-app.jma-1.1
             "
+        '''
 
     }
 
