@@ -36,7 +36,7 @@ def deployApp() {
                 docker pull pierrechukason/demo-app.jma-1.1 &&
                 docker stop demo-app || true &&
                 docker rm demo-app || true &&
-                docker run -d --name demo-app -p 8080:8080 pierrechukason/demo-app.jma-1.1
+                docker run -d --name demo-app -p 8081:8080 pierrechukason/demo-app.jma-1.1
             "
         '''
     }
