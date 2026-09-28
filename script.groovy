@@ -11,7 +11,7 @@ def buildImage() {
 
     withCredentials([
         usernamePassword(
-            credentialsId: 'docker-hub-repo',
+            credentialsId: 'Docker-Hub-Credentials',
             passwordVariable: 'PASS',
             usernameVariable: 'USER'
         )
