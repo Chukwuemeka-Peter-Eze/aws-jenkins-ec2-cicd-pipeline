@@ -1,11 +1,15 @@
+```groovy
 def gv
 
-pipeline {   
+pipeline {
     agent any
+
     tools {
         maven 'maven-3.9'
     }
+
     stages {
+
         stage("init") {
             steps {
                 script {
@@ -13,11 +17,11 @@ pipeline {
                 }
             }
         }
+
         stage("build jar") {
             steps {
                 script {
                     gv.buildJar()
-
                 }
             }
         }
@@ -36,6 +40,7 @@ pipeline {
                     gv.deployApp()
                 }
             }
-        }               
+        }
     }
-} 
+}
+```
