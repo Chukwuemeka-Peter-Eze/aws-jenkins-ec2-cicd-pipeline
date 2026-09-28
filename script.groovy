@@ -1,4 +1,4 @@
-groovy
+```groovy
 def buildJar() {
 
     echo 'building the application...'
@@ -47,3 +47,4 @@ def deployApp() {
 }
 
 return this
+```
